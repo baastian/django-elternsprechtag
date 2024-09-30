@@ -54,31 +54,22 @@ class StudentListView(SingleTableView):
     paginate_by = 75
     template_name = "administrative/student/student_list_view.html"
 
+    def get_context_data(self, *args, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["student_search"] = StudentDirectSelectForm()
+        context["unapproved_changes"] = StudentChange.objects.filter(
+            approved=False
+        ).exists()
+        context["unsend_up_users"] = Upcomming_User.objects.filter(
+            email_send=False
+        ).exists()
+        return context
 
-# @method_decorator(login_staff, name="dispatch")
-# class ParentTableView(View):
-#     def get(self, request):
-#         parents = CustomUser.objects.filter(role=0)
-#         parents_table = ParentsTable(parents)
-
-#         return render(
-#             request,
-#             "administrative/users/parents/parents_overview.html",
-#             {"parents_table": parents_table},
-#         )
-
-
-# @method_decorator(login_staff, name="dispatch")
-# class TeacherTableView(View):
-#     def get(self, request):
-#         teachers = CustomUser.objects.filter(role=1)
-#         teachers_table = TeachersTable(teachers)
-
-#         return render(
-#             request,
-#             "administrative/users/teachers/teachers_overview.html",
-#             {"teachers_table": teachers_table},
-#         )
+    def get(self, request, *args, **kwargs):
+        if request.GET.get("student", None):
+            print(request.GET.get("student", None))
+            return redirect("student_details_view", pk=request.GET.get("student", None))
+        return super().get(request, *args, **kwargs)
 
 
 @method_decorator(login_staff, name="dispatch")
@@ -549,3 +540,74 @@ class ManualParentAddStudent(View):
                 "administrative/student/manual_parent_registration_add.html",
                 {"form": form, "student": student},
             )
+
+@method_decorator(login_staff, name="dispatch")
+class UpcommingUserBatchSendView(View):
+    def get(self, request):
+        form = UpcommingUserBatchSendForm()
+
+        return render(
+            request,
+            "administrative/administrative_form_fallback.html",
+            {
+                "form": form,
+                "title": _("Batch send upcomming user"),
+                "back_url": reverse("student_list_view"),
+            },
+        )
+
+    def post(self, request):
+        form = UpcommingUserBatchSendForm(data=request.POST)
+
+        if form.is_valid():
+            # relevant_students = Student.objects.filter(
+            #     pk__in=list(
+            #         Upcomming_User.objects.all().values_list("student", flat=True)
+            #     )
+            # ).exclude(
+            #     pk__in=list(
+            #         form.cleaned_data["exclude_students"].values_list("pk", flat=True)
+            #     )
+            # )
+            print(form.cleaned_data["resend"], form.cleaned_data["exclude_students"])
+            if form.cleaned_data["resend"]:
+                up_users = Upcomming_User.objects.all()
+            else:
+                up_users = Upcomming_User.objects.filter(email_send=False)
+            student_list = Student.objects.filter(
+                pk__in=list(up_users.values_list("student", flat=True))
+            ).exclude(
+                pk__in=list(
+                    list(
+                        form.cleaned_data["exclude_students"].values_list(
+                            "pk", flat=True
+                        )
+                    )
+                )
+            )
+            print(student_list)
+            process_task = batch_send_upcomming_user_registration_link.delay(
+                exclude_pks=list(
+                    form.cleaned_data["exclude_students"].values_list("pk", flat=True)
+                ),
+                resend=form.cleaned_data["resend"],
+            )
+
+            return render(
+                request,
+                "administrative/progress.html",
+                {
+                    "task_id": process_task.task_id,
+                    "success_url": reverse("student_list_view"),
+                },
+            )
+
+        return render(
+            request,
+            "administrative/administrative_form_fallback.html",
+            {
+                "form": form,
+                "title": _("Batch send upcomming user"),
+                "back_url": reverse("student_list_view"),
+            },
+        )

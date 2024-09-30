@@ -3,22 +3,17 @@
 {% load crispy_forms_tags %}
 {% load i18n %}
 
-{% block header %} {% translate 'Appointments' %} {% endblock header %}
-{% block underline %} {% translate 'All appointments are listed here.' %} {% endblock underline %}
+{% block header %} {% translate 'Teacher day event groups' %} {% endblock header %}
+{% block underline %} {% translate 'All groups of events per teacher per date are listed here.' %} {% endblock underline %}
 
-{% block title %} {% translate 'Appointments' %} {% endblock title %}
-
-{% block extra_head %}
-{{ filter.form.media.css }}
-{% endblock extra_head %}
+{% block title %} {% translate 'Teacher groups' %} {% endblock title %}
 
 {% block time_slot_content %}
-{% if filter %}
+{% if filter  %}
 <form action="" method="get" class="form form-inline">
     <div class="grid gap-3 d-flex">
         <div class="flex-grow-1">
             {{filter.form.teacher | as_crispy_field}}
-            {{ filter.form.media.js }}
         </div>
         <div class="">
             <button class="btn btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#collapsefilter"
@@ -30,15 +25,15 @@
     <div class="row mb-2">
         <div class="collapse" id="collapsefilter">
             <div class="card card-body">
-                <div class="h5">
+                {% comment %} <div class="h5">
                     {% translate 'Status' %}
                 </div>
                 <div>
                     {{filter.form.status | as_crispy_field}}
                 </div>
-                <div class="dropdown-divider">
+                <div class="dropdown-divider"> {% endcomment %}
 
-                </div>
+                {% comment %} </div> {% endcomment %}
                 <div class="h5">
                     {% translate 'Lead status' %}
                 </div>
@@ -50,15 +45,6 @@
                 </div>
                 <div class="h5">
                     {% translate 'Base event' %}
-                </div>
-                <div>
-                    {{filter.form.base_event | as_crispy_field}}
-                </div>
-                <div class="dropdown-divider">
-
-                </div>
-                <div class="h5">
-                    {% translate 'Day group' %}
                 </div>
                 <div>
                     {{filter.form.day_group | as_crispy_field}}

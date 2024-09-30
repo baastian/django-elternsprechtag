@@ -17,7 +17,14 @@ from dashboard.models import (
     TeacherEventGroup,
     BaseEventGroup,
 )
-from authentication.models import CustomUser, Tag, Student, TeacherExtraData
+from authentication.models import (
+    CustomUser,
+    Student,
+    TeacherExtraData,
+    Tag,
+    generate_new_color,
+    Upcomming_User,
+)
 from django.utils import timezone
 from django.db.models import Q
 from django.contrib.auth.models import Permission
@@ -55,6 +62,7 @@ class StudentSelect2WidgetMixin(object):
 
 
 class StudentWidget(s2forms.ModelSelect2Widget):
+    model = Student
     search_fields = [
         "first_name__icontains",
         "last_name__icontains",
@@ -63,6 +71,7 @@ class StudentWidget(s2forms.ModelSelect2Widget):
 
 
 class PermissionWidget(s2forms.ModelSelect2MultipleWidget):
+    model = Permission
     search_fields = [
         "codename__icontains",
         "name__icontains",
@@ -70,11 +79,25 @@ class PermissionWidget(s2forms.ModelSelect2MultipleWidget):
 
 
 class MultiStudentWidget(StudentSelect2WidgetMixin, s2forms.ModelSelect2MultipleWidget):
+    model = Student
     search_fields = [
         "first_name__icontains",
         "last_name__icontains",
         "child_email__icontains",
     ]
+
+
+class StudentDirectSelectForm(forms.Form):
+    student = forms.ModelChoiceField(
+        queryset=Student.objects.all(),
+        widget=StudentWidget(
+            attrs={
+                "onchange": "this.form.submit()",
+                "data-placeholder": "Search for a student",
+            }
+        ),
+        label="",
+    )
 
 
 class CsvImportForm(forms.Form):
@@ -107,22 +130,71 @@ class EventAddNewDateForm(forms.Form):
         queryset=BaseEventGroup.objects.filter(valid_until__gte=timezone.now().date()),
         empty_label=_("New base event"),
         required=False,
-        label="",
     )
-    date = forms.DateField(
-        label="",
-    )
+    date = forms.DateField()
     teacher = forms.ModelMultipleChoiceField(
         queryset=CustomUser.objects.filter(role=1),
-        widget=forms.CheckboxSelectMultiple,
+        widget=forms.CheckboxSelectMultiple(),
         label="",
     )
     lead_start = forms.DateField(
-        label="",
+        required=False,
+        help_text="This setting is only required if you create a new base event.",
     )
     lead_inquiry_start = forms.DateField(
-        label="",
+        required=False,
+        help_text="This setting is only required if you create a new base event.",
     )
+
+    def clean_date(self):
+        date = self.cleaned_data["date"]
+
+        if not date >= timezone.now().date():
+            self.add_error(
+                "date", _("The date of the event should be set in the future.")
+            )
+
+        return date
+
+    def clean_lead_start(self):
+        lead_start = self.cleaned_data["lead_start"]
+        date = self.cleaned_data["date"]
+        base_event = self.cleaned_data.get("base_event", None)
+
+        if not base_event and not lead_start:
+            self.add_error(
+                "lead_inquiry_start",
+                _("This field must be set if you want to create a new base event."),
+            )
+        elif not base_event:
+            if lead_start >= date:
+                self.add_error("lead_start", _("The lead must start before the event."))
+
+        return lead_start
+
+    def clean_lead_inquiry_start(self):
+        lead_start = self.cleaned_data["lead_start"]
+        lead_inquiry_start = self.cleaned_data["lead_inquiry_start"]
+        base_event = self.cleaned_data.get("base_event", None)
+        date = self.cleaned_data["date"]
+
+        if not base_event and not lead_inquiry_start:
+            self.add_error(
+                "lead_inquiry_start",
+                _("This field must be set if you want to create a new base event."),
+            )
+        elif not base_event:
+            if lead_inquiry_start >= date:
+                self.add_error(
+                    "lead_inquiry_start", _("The lead must start before the event.")
+                )
+
+            if lead_inquiry_start > lead_start:
+                self.add_error(
+                    "lead_inquiry_start",
+                    _("The lead inquiry must start before the main lead."),
+                )
+        return lead_inquiry_start
 
 
 class EventChangeFormulaEditForm(forms.ModelForm):
@@ -435,7 +507,11 @@ class SettingsEditForm(forms.ModelForm):
 class EventEditForm(forms.ModelForm):
     class Meta:
         model = Event
-        exclude = ("teacher_event_group", "day_group", "teacher", "start", "end")
+        fields = [
+            "lead_status",
+            "lead_manual_override",
+            "disable_automatic_changes",
+        ]
 
     def save(self, commit=True):
         instance: Event = self.instance
@@ -455,7 +531,14 @@ class EventAddStudentForm(forms.ModelForm):
         fields = []
 
     add_student = forms.ModelChoiceField(
-        queryset=Student.objects.all(), required=False, widget=StudentWidget
+        queryset=Student.objects.all(),
+        required=False,
+        widget=StudentWidget(
+            attrs={
+                "data-dropdown-parent": "#addStudentModal",
+                "data-placeholder": "Select an option",
+            }
+        ),
     )
 
     def __init__(self, *args, **kwargs):
@@ -465,7 +548,6 @@ class EventAddStudentForm(forms.ModelForm):
             choices = get_students_choices_for_event(event=self.instance)
 
             if choices.__len__() == 0:
-                print("Test")
                 self.fields["add_student"].widget = self.fields[
                     "add_student"
                 ].hidden_widget()
@@ -611,4 +693,123 @@ class TagForm(forms.ModelForm):
     class Meta:
         model = Tag
         fields = ["name", "synonyms", "color"]
-        widgets = {"color": ColorWidget}
+        # widgets = {"color": ColorWidget}
+
+
+class BaseEventEditLeadStatusForm(forms.ModelForm):
+    class Meta:
+        model = BaseEventGroup
+        fields = ["lead_status", "disable_automatic_changes", "force", "manual_apply"]
+
+    manual_apply = forms.BooleanField(
+        initial=True, widget=forms.HiddenInput, required=False
+    )
+
+    def clean_manual_apply(self):
+        return True
+
+
+class BaseEventEditLeadDateForm(forms.ModelForm):
+    class Meta:
+        model = BaseEventGroup
+        fields = ["lead_start", "lead_inquiry_start", "force", "manual_apply"]
+
+    manual_apply = forms.BooleanField(
+        initial=True, widget=forms.HiddenInput, required=False
+    )
+
+    def clean_manual_apply(self):
+        return True
+
+    def clean_lead_start(self):
+        lead_start = self.cleaned_data["lead_start"]
+
+        if (
+            lead_start
+            > self.instance.dayeventgroup_set.all().order_by("date").first().date
+        ):
+            self.add_error(
+                "lead_start",
+                _("The lead must start before the event."),
+            )
+        return lead_start
+
+    def clean_lead_inquiry_start(self):
+        lead_start = self.cleaned_data["lead_start"]
+        lead_inquiry_start = self.cleaned_data["lead_inquiry_start"]
+
+        if lead_inquiry_start > lead_start:
+            self.add_error(
+                "lead_inquiry_start",
+                _("The lead inquiry must start before the main lead."),
+            )
+        return lead_inquiry_start
+
+
+class TeacherDayGroupEditLeadStatusForm(forms.ModelForm):
+    class Meta:
+        model = TeacherEventGroup
+        fields = ["lead_status", "disable_automatic_changes", "force", "manual_apply"]
+
+    manual_apply = forms.BooleanField(
+        initial=True, widget=forms.HiddenInput, required=False
+    )
+
+    def clean_manual_apply(self):
+        return True
+
+
+class TeacherDayGroupEditLeadDateForm(forms.ModelForm):
+    class Meta:
+        model = TeacherEventGroup
+        fields = ["lead_start", "lead_inquiry_start", "force", "manual_apply"]
+
+    manual_apply = forms.BooleanField(
+        initial=True, widget=forms.HiddenInput, required=False
+    )
+
+    def clean_manual_apply(self):
+        return True
+
+    def clean_lead_start(self):
+        lead_start = self.cleaned_data["lead_start"]
+
+        if lead_start > self.instance.day_group.date:
+            self.add_error(
+                "lead_start",
+                _("The lead must start before the event."),
+            )
+        return lead_start
+
+    def clean_lead_inquiry_start(self):
+        lead_start = self.cleaned_data["lead_start"]
+        lead_inquiry_start = self.cleaned_data["lead_inquiry_start"]
+
+        if lead_inquiry_start > lead_start:
+            self.add_error(
+                "lead_inquiry_start",
+                _("The lead inquiry must start before the main lead."),
+            )
+        return lead_inquiry_start
+
+
+class UpcommingUserBatchSendForm(forms.Form):
+    exclude_students = forms.ModelMultipleChoiceField(
+        queryset=Student.objects.all(),
+        widget=MultiStudentWidget(),
+        required=False,
+    )
+
+    resend = forms.BooleanField(initial=False, required=False)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(self, *args, **kwargs)
+
+        self.fields["exclude_students"].choices = [
+            [student.pk, f"{student.first_name} {student.last_name}"]
+            for student in Student.objects.filter(
+                pk__in=list(
+                    Upcomming_User.objects.all().values_list("student", flat=True)
+                )
+            )
+        ]

@@ -271,7 +271,7 @@ class OthersEditView(View):
 class ResetPasswordWithLink(View):
     def post(self, request, pk):
         user = get_object_or_404(CustomUser, pk=pk)
-        print(user, request.user)
+
         if user == request.user or user.is_superuser:
             messages.error(
                 request,
@@ -325,12 +325,15 @@ class ResetPasswordWithLink(View):
             request, "The password reset mail was successfully send to the user."
         )
         match user.role:
-            case 0:
+            case user.UserRoleChoices.PARENT:
                 return redirect("parent_edit_view", user.pk)
-            case 1:
+            case user.UserRoleChoices.TEACHER:
                 return redirect("teachers_edit_view", user.pk)
+            case user.UserRoleChoices.OTHER:
+                return redirect("others_edit_view", user.pk)
 
 
+@method_decorator(login_staff, name="dispatch")
 class TagsListView(SingleTableView):
     model = Tag
     table_class = TagsTable
@@ -338,6 +341,7 @@ class TagsListView(SingleTableView):
     template_name = "administrative/users/teachers/tags/tags_list.html"
 
 
+@method_decorator(login_staff, name="dispatch")
 class TagEditView(View):
     def get(self, request, pk):
         tag = get_object_or_404(Tag, pk=pk)
@@ -366,6 +370,7 @@ class TagEditView(View):
         )
 
 
+@method_decorator(login_staff, name="dispatch")
 class TagCreateView(View):
     def get(self, request):
 
